@@ -1,0 +1,557 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "metadata": {
+        "description": "Name of the environment (used as suffix for all resources)"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "allowedValues": [
+        "eastus",
+        "westus2",
+        "swedencentral",
+        "northeurope",
+        "westeurope",
+        "eastasia",
+        "japaneast",
+        "australiaeast",
+        "northcentralus",
+        "germanywestcentral"
+      ],
+      "metadata": {
+        "description": "Primary location for all resources. Pick a region that supports Azure Container Apps Dynamic Sessions."
+      }
+    },
+    "openAiSkuName": {
+      "type": "string",
+      "defaultValue": "S0"
+    }
+  },
+  "variables": {
+    "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), parameters('location')))]",
+    "prefix": "dreamv2",
+    "tags": {
+      "lab-env": "[parameters('environmentName')]"
+    },
+    "logAnalyticsName": "[concat('log-', variables('resourceToken'))]",
+    "appInsightsName": "[concat('appi-', variables('resourceToken'))]",
+    "acrName": "[concat('cr', variables('resourceToken'))]",
+    "vnetName": "[concat('vnet-', variables('resourceToken'))]",
+    "nsgDefaultName": "[concat('nsg-default-', variables('resourceToken'))]",
+    "nsgAcaName": "[concat('nsg-aca-', variables('resourceToken'))]",
+    "acaEnvName": "[concat('cae-', variables('resourceToken'))]",
+    "identityName": "[concat('id-backend-', variables('resourceToken'))]",
+    "openAiName": "[concat('cog-', variables('resourceToken'))]",
+    "cosmosDbName": "[concat('cosmos-', variables('resourceToken'))]",
+    "storageName": "[concat('st', variables('resourceToken'))]",
+    "aiSearchName": "[concat('srch-', variables('resourceToken'))]",
+    "sessionPoolName": "sessionPool",
+    "staticSiteName": "[concat('stapp-', variables('resourceToken'))]",
+    "customSubDomainName": "[concat(variables('prefix'), '-', variables('resourceToken'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2021-12-01-preview",
+      "name": "[variables('logAnalyticsName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "retentionInDays": 30,
+        "sku": {
+          "name": "PerGB2018"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "kind": "web",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ],
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      }
+    },
+    {
+      "type": "Microsoft.ContainerRegistry/registries",
+      "apiVersion": "2023-01-01-preview",
+      "name": "[variables('acrName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "adminUserEnabled": true,
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2021-05-01",
+      "name": "[variables('nsgDefaultName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "securityRules": []
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2021-05-01",
+      "name": "[variables('nsgAcaName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "Allow-Internet-HTTPS",
+            "properties": {
+              "priority": 100,
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "Internet",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "443"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2021-05-01",
+      "name": "[variables('vnetName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgDefaultName'))]",
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgAcaName'))]"
+      ],
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": ["10.0.0.0/16"]
+        },
+        "subnets": [
+          {
+            "name": "default",
+            "properties": {
+              "addressPrefix": "10.0.1.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgDefaultName'))]"
+              }
+            }
+          },
+          {
+            "name": "aca",
+            "properties": {
+              "addressPrefix": "10.0.2.0/23",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgAcaName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2024-03-01",
+      "name": "[variables('acaEnvName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))).customerId]",
+            "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName')), '2021-12-01-preview').primarySharedKey]"
+          }
+        },
+        "daprAIConnectionString": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName'))).ConnectionString]",
+        "vnetConfiguration": {
+          "infrastructureSubnetId": "[concat(resourceId('Microsoft.Network/virtualNetworks', variables('vnetName')), '/subnets/aca')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "apiVersion": "2023-01-31",
+      "name": "[variables('identityName')]",
+      "location": "[parameters('location')]"
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(subscription().id, resourceGroup().id, variables('identityName'), 'acrPull')]",
+      "scope": "[concat('Microsoft.ContainerRegistry/registries/', variables('acrName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+        "principalType": "ServicePrincipal",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))).principalId]"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2024-10-01",
+      "name": "[variables('openAiName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('openAiSkuName')]"
+      },
+      "kind": "OpenAI",
+      "properties": {
+        "customSubDomainName": "[variables('customSubDomainName')]"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2024-10-01",
+      "name": "[concat(variables('openAiName'), '/gpt-4o')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.CognitiveServices/accounts', variables('openAiName'))]"
+      ],
+      "sku": {
+        "name": "GlobalStandard",
+        "capacity": 200
+      },
+      "properties": {
+        "model": {
+          "name": "gpt-4o",
+          "format": "OpenAI",
+          "version": "2024-11-20"
+        },
+        "versionUpgradeOption": "OnceCurrentVersionExpired"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2024-10-01",
+      "name": "[concat(variables('openAiName'), '/gpt-4o-mini')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('openAiName'), 'gpt-4o')]"
+      ],
+      "sku": {
+        "name": "GlobalStandard",
+        "capacity": 70
+      },
+      "properties": {
+        "model": {
+          "name": "gpt-4o-mini",
+          "format": "OpenAI",
+          "version": "2024-07-18"
+        },
+        "versionUpgradeOption": "OnceCurrentVersionExpired"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2024-10-01",
+      "name": "[concat(variables('openAiName'), '/text-embedding-3-large')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.CognitiveServices/accounts/deployments', variables('openAiName'), 'gpt-4o-mini')]"
+      ],
+      "sku": {
+        "name": "Standard",
+        "capacity": 60
+      },
+      "properties": {
+        "model": {
+          "name": "text-embedding-3-large",
+          "format": "OpenAI",
+          "version": "1"
+        },
+        "versionUpgradeOption": "OnceCurrentVersionExpired"
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts",
+      "apiVersion": "2021-04-15",
+      "name": "[variables('cosmosDbName')]",
+      "location": "[parameters('location')]",
+      "kind": "GlobalDocumentDB",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "databaseAccountOfferType": "Standard",
+        "locations": [
+          {
+            "locationName": "[parameters('location')]",
+            "failoverPriority": 0
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases",
+      "apiVersion": "2022-05-15",
+      "name": "[concat(variables('cosmosDbName'), '/ag_demo')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbName'))]"
+      ],
+      "properties": {
+        "resource": {
+          "id": "ag_demo"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+      "apiVersion": "2021-04-15",
+      "name": "[concat(variables('cosmosDbName'), '/ag_demo/ag_demo')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('cosmosDbName'), 'ag_demo')]"
+      ],
+      "properties": {
+        "resource": {
+          "id": "ag_demo",
+          "partitionKey": {
+            "paths": ["/user_id"],
+            "kind": "Hash"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+      "apiVersion": "2021-04-15",
+      "name": "[concat(variables('cosmosDbName'), '/ag_demo/agent_teams')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('cosmosDbName'), 'ag_demo')]"
+      ],
+      "properties": {
+        "resource": {
+          "id": "agent_teams",
+          "partitionKey": {
+            "paths": ["/team_id"],
+            "kind": "Hash"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2021-09-01",
+      "name": "[variables('storageName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "accessTier": "Hot"
+      }
+    },
+    {
+      "type": "Microsoft.Search/searchServices",
+      "apiVersion": "2024-06-01-preview",
+      "name": "[variables('aiSearchName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "basic"
+      },
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]": {}
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "properties": {
+        "hostingMode": "default",
+        "replicaCount": 1,
+        "partitionCount": 1,
+        "authOptions": {
+          "aadOrApiKey": {
+            "aadAuthFailureMode": "http403"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.App/sessionPools",
+      "apiVersion": "2024-02-02-preview",
+      "name": "[variables('sessionPoolName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "containerType": "PythonLTS",
+        "dynamicPoolConfiguration": {
+          "cooldownPeriodInSeconds": 300,
+          "executionType": "Timed"
+        },
+        "poolManagementType": "Dynamic",
+        "scaleConfiguration": {
+          "maxConcurrentSessions": 20,
+          "readySessionInstances": 2
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/staticSites",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('staticSiteName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "sku": {
+        "name": "Standard",
+        "tier": "Standard"
+      },
+      "properties": {
+        "buildProperties": {
+          "appLocation": "/",
+          "apiLocation": "",
+          "appArtifactLocation": "dist"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(variables('openAiName'), variables('identityName'), 'CognitiveServicesOpenAIUser')]",
+      "scope": "[concat('Microsoft.CognitiveServices/accounts/', variables('openAiName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.CognitiveServices/accounts', variables('openAiName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')]",
+        "principalType": "ServicePrincipal",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))).principalId]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(variables('aiSearchName'), variables('identityName'), 'SearchServiceContributor')]",
+      "scope": "[concat('Microsoft.Search/searchServices/', variables('aiSearchName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Search/searchServices', variables('aiSearchName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7ca78c08-252a-4471-8644-bb5ff32d4ba0')]",
+        "principalType": "ServicePrincipal",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))).principalId]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(variables('storageName'), variables('identityName'), 'StorageBlobDataContributor')]",
+      "scope": "[concat('Microsoft.Storage/storageAccounts/', variables('storageName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
+        "principalType": "ServicePrincipal",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))).principalId]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(variables('sessionPoolName'), variables('identityName'), 'SessionExecutor')]",
+      "scope": "[concat('Microsoft.App/sessionPools/', variables('sessionPoolName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.App/sessionPools', variables('sessionPoolName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '0fb8eba5-a2bb-4abe-b1c1-49dfad359bb0')]",
+        "principalType": "ServicePrincipal",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))).principalId]"
+      }
+    }
+  ],
+  "outputs": {
+    "RESOURCE_GROUP": {
+      "type": "string",
+      "value": "[resourceGroup().name]"
+    },
+    "ACR_NAME": {
+      "type": "string",
+      "value": "[variables('acrName')]"
+    },
+    "ACR_LOGIN_SERVER": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))).loginServer]"
+    },
+    "ACA_ENVIRONMENT_NAME": {
+      "type": "string",
+      "value": "[variables('acaEnvName')]"
+    },
+    "IDENTITY_NAME": {
+      "type": "string",
+      "value": "[variables('identityName')]"
+    },
+    "IDENTITY_RESOURCE_ID": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+    },
+    "IDENTITY_CLIENT_ID": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))).clientId]"
+    },
+    "AZURE_OPENAI_ENDPOINT": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiName'))).endpoint]"
+    },
+    "COSMOS_DB_URI": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbName'))).documentEndpoint]"
+    },
+    "STORAGE_ACCOUNT_ENDPOINT": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))).primaryEndpoints.blob]"
+    },
+    "STORAGE_ACCOUNT_ID": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageName'))]"
+    },
+    "AI_SEARCH_ENDPOINT": {
+      "type": "string",
+      "value": "[concat('https://', variables('aiSearchName'), '.search.windows.net')]"
+    },
+    "POOL_MANAGEMENT_ENDPOINT": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.App/sessionPools', variables('sessionPoolName'))).poolManagementEndpoint]"
+    },
+    "APP_INSIGHTS_CONNECTION_STRING": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName'))).ConnectionString]"
+    },
+    "STATIC_SITE_NAME": {
+      "type": "string",
+      "value": "[variables('staticSiteName')]"
+    },
+    "STATIC_SITE_HOSTNAME": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/staticSites', variables('staticSiteName'))).defaultHostname]"
+    }
+  }
+}
