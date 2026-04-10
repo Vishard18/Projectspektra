@@ -5,6 +5,7 @@ import {
   Bell,
   ChevronsUpDown,
   // CreditCard,
+  LogIn,
   LogOut,
   // Sparkles,
 } from "lucide-react"
@@ -40,6 +41,9 @@ export function NavUser({
   }
 }) {
   const { isMobile } = useSidebar()
+  const isGuest = user.email === "guest@example.com"
+  const loginUrl = "/.auth/login/aad?post_login_redirect_uri=/"
+  const logoutUrl = "/.auth/logout?post_logout_redirect_uri=/"
 
   return (
     <SidebarMenu>
@@ -87,10 +91,21 @@ export function NavUser({
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <LogOut />
-              Log out
-            </DropdownMenuItem>
+            {isGuest ? (
+              <DropdownMenuItem asChild>
+                <a href={loginUrl}>
+                  <LogIn />
+                  Sign in with Microsoft
+                </a>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem asChild>
+                <a href={logoutUrl}>
+                  <LogOut />
+                  Log out
+                </a>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

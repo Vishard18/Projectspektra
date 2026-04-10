@@ -48,13 +48,16 @@
     "nsgAcaName": "[concat('nsg-aca-', variables('resourceToken'))]",
     "acaEnvName": "[concat('cae-', variables('resourceToken'))]",
     "identityName": "[concat('id-backend-', variables('resourceToken'))]",
+    "keyVaultName": "[concat('kv-', variables('resourceToken'))]",
     "openAiName": "[concat('cog-', variables('resourceToken'))]",
     "cosmosDbName": "[concat('cosmos-', variables('resourceToken'))]",
     "storageName": "[concat('st', variables('resourceToken'))]",
     "aiSearchName": "[concat('srch-', variables('resourceToken'))]",
-    "sessionPoolName": "sessionPool",
+    "sessionPoolName": "[concat('sessionpool-', variables('resourceToken'))]",
     "staticSiteName": "[concat('stapp-', variables('resourceToken'))]",
-    "customSubDomainName": "[concat(variables('prefix'), '-', variables('resourceToken'))]"
+    "customSubDomainName": "[concat(variables('prefix'), '-', variables('resourceToken'))]",
+    "staticSiteLocation": "eastus2",
+    "cosmosLocation": "eastus2"
   },
   "resources": [
     {
@@ -159,6 +162,14 @@
             "name": "aca",
             "properties": {
               "addressPrefix": "10.0.2.0/23",
+              "delegations": [
+                {
+                  "name": "acaDelegation",
+                  "properties": {
+                    "serviceName": "Microsoft.App/environments"
+                  }
+                }
+              ],
               "networkSecurityGroup": {
                 "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgAcaName'))]"
               }
@@ -199,6 +210,29 @@
       "location": "[parameters('location')]"
     },
     {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "tenantId": "[subscription().tenantId]",
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "enableRbacAuthorization": true,
+        "enabledForDeployment": false,
+        "enabledForDiskEncryption": false,
+        "enabledForTemplateDeployment": false,
+        "publicNetworkAccess": "Enabled",
+        "networkAcls": {
+          "bypass": "AzureServices",
+          "defaultAction": "Allow"
+        }
+      }
+    },
+    {
       "type": "Microsoft.Authorization/roleAssignments",
       "apiVersion": "2022-04-01",
       "name": "[guid(subscription().id, resourceGroup().id, variables('identityName'), 'acrPull')]",
@@ -209,6 +243,21 @@
       ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+        "principalType": "ServicePrincipal",
+        "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))).principalId]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(variables('keyVaultName'), variables('identityName'), 'KeyVaultSecretsUser')]",
+      "scope": "[concat('Microsoft.KeyVault/vaults/', variables('keyVaultName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
         "principalType": "ServicePrincipal",
         "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))).principalId]"
       }
@@ -290,14 +339,14 @@
       "type": "Microsoft.DocumentDB/databaseAccounts",
       "apiVersion": "2021-04-15",
       "name": "[variables('cosmosDbName')]",
-      "location": "[parameters('location')]",
+      "location": "[variables('cosmosLocation')]",
       "kind": "GlobalDocumentDB",
       "tags": "[variables('tags')]",
       "properties": {
         "databaseAccountOfferType": "Standard",
         "locations": [
           {
-            "locationName": "[parameters('location')]",
+            "locationName": "[variables('cosmosLocation')]",
             "failoverPriority": 0
           }
         ]
@@ -413,7 +462,7 @@
       "type": "Microsoft.Web/staticSites",
       "apiVersion": "2022-03-01",
       "name": "[variables('staticSiteName')]",
-      "location": "[parameters('location')]",
+      "location": "[variables('staticSiteLocation')]",
       "tags": "[variables('tags')]",
       "sku": {
         "name": "Standard",
@@ -520,6 +569,14 @@
     "AZURE_OPENAI_ENDPOINT": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiName'))).endpoint]"
+    },
+    "KEY_VAULT_NAME": {
+      "type": "string",
+      "value": "[variables('keyVaultName')]"
+    },
+    "KEY_VAULT_URI": {
+      "type": "string",
+      "value": "[concat('https://', variables('keyVaultName'), '.vault.azure.net/')]"
     },
     "COSMOS_DB_URI": {
       "type": "string",

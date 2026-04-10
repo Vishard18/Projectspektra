@@ -15,16 +15,12 @@ import {
   // Wrench,
 } from "lucide-react"
 import { NavMain } from "@/components/nav-main"
-import { NavUser } from "@/components/nav-user"
 import { TeamSwitcher } from "@/components/team-switcher"
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
 } from "@/components/ui/sidebar"
-import { useUserContext } from "@/contexts/UserContext"
-import h1 from '@/assets/h1.png'
 
 import { Team, useTeamsContext } from '@/contexts/TeamsContext';
 
@@ -34,11 +30,6 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
 }
 
 const data = {
-  user: {
-    name: "Jon Doe",
-    email: "johne@microsoft.com",
-    avatar: h1,
-  },
   navMain: [
     {
       title: "Playground",
@@ -97,7 +88,6 @@ export function AppSidebar({
   onTeamSelect,
   ...sidebarProps
 }: AppSidebarProps) {
-  const { userInfo } = useUserContext();
   const { teams } = useTeamsContext();
 
   return (
@@ -108,9 +98,6 @@ export function AppSidebar({
       <SidebarContent>
         <NavMain items={data.navMain} />
       </SidebarContent>
-      <SidebarFooter>
-        <NavUser user={userInfo} />
-      </SidebarFooter>
     </Sidebar>
   );
 }

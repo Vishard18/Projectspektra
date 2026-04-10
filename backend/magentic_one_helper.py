@@ -100,12 +100,11 @@ class MagenticOneHelper:
             self.session_id = generate_session_name()
         else:
             self.session_id = session_id
-        # print(f"Session MODEL gpt-4.1-2025-04-14")
-        print(f"Session MODEL o4-mini-2025-04-16")
+        print("Session MODEL gpt-4o-2024-11-20")
         self.client = AzureOpenAIChatCompletionClient(
-            model="gpt-4.1-2025-04-14",
-            azure_deployment="gpt-4.1",
-            api_version="2025-03-01-preview",
+            model="gpt-4o-2024-11-20",
+            azure_deployment="gpt-4o",
+            api_version="2024-06-01",
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             azure_ad_token_provider=token_provider,
             model_info={
@@ -117,16 +116,16 @@ class MagenticOneHelper:
         )
 
         self.client_reasoning = AzureOpenAIChatCompletionClient(
-            model="o4-mini-2025-04-16",
-            azure_deployment="o4-mini",
-            api_version="2025-03-01-preview",
+            model="gpt-4o-mini-2024-07-18",
+            azure_deployment="gpt-4o-mini",
+            api_version="2024-06-01",
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             azure_ad_token_provider=token_provider,
             model_info={
                 "vision": True,
                 "function_calling": True,
                 "json_output": True,
-                "family": "o4"
+                "family": "gpt-4o"
             }
         )
 

@@ -13,8 +13,8 @@ interface UserContextType {
 }
 
 const defaultUserInfo: UserInfo = {
-  name: "Jon Doe",
-  email: "demo@contoso.com",
+  name: "Guest",
+  email: "guest@example.com",
   avatar: h1,
 };
 
@@ -38,15 +38,27 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 export async function getUserInfo() {
   try {
     const response = await fetch('/.auth/me');
-    const payload = await response.json();
-    const { clientPrincipal } = payload;
+    if (!response.ok) {
+      return defaultUserInfo;
+    }
 
-    // Extract the username from the email
+    const payload = await response.json();
+    const clientPrincipal = Array.isArray(payload)
+      ? payload[0]?.clientPrincipal
+      : payload?.clientPrincipal;
+
+    if (!clientPrincipal?.userDetails) {
+      return defaultUserInfo;
+    }
+
     const email = clientPrincipal.userDetails;
-    const username = email.split('@')[0];
+    const name =
+      clientPrincipal.userRoles?.find((role: string) => role && role !== 'anonymous') ||
+      clientPrincipal.userDetails?.split('@')[0] ||
+      defaultUserInfo.name;
 
     return {
-      name: username,
+      name,
       email: email,
       avatar: h1,
     };
