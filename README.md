@@ -1,6 +1,10 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-blue)](https://www.linkedin.com/in/yaniv-vaknin-7a8324178/)
 
+# Projectspektra
+
+Internship project based on the Dream Team multi-agent sample.
+
 # Build your dream team with Autogen
 
 This repository is a part of the Azure Samples collection and utilizes Microsoft Autogen 0.4 alongside Azure OpenAI. It seamlessly integrates with a React UI to create a comprehensive end-to-end multi-agent application. Designed for simplicity, this repository streamlines the process of building, testing, and deploying an advanced multi-agent framework. [Magentic One](https://www.microsoft.com/en-us/research/articles/magentic-one-a-generalist-multi-agent-system-for-solving-complex-tasks/)
