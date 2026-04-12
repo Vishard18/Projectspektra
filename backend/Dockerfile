@@ -25,12 +25,12 @@ RUN uv sync --locked --no-dev
 
 # Place executables in the environment at the front of the path
 ENV PATH="/code/.venv/bin:$PATH"
-RUN playwright install --with-deps chromium
 
 
 
 # Expose the port that the app will run on
 EXPOSE 3100
 
-# Command to run the application using Uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3100", "--workers", "4"]
+# Container Apps runs well with a single worker and this avoids startup pressure
+# that can cause activation failures on smaller revisions.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3100", "--workers", "1"]

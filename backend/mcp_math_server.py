@@ -4,8 +4,8 @@ import os
 import json
 import logging
 from azure.communication.email import EmailClient
-from azure.identity import DefaultAzureCredential
 from dotenv import load_dotenv
+from auth import get_azure_credential
 # Load environment variables from .env file
 load_dotenv()
 
@@ -59,7 +59,7 @@ def mailer(
         subject = os.environ.get("AZURE_COMMUNICATION_EMAIL_SUBJECT_DEFAULT")
     logger.info(f"Sending email to {to_address}...")
     try:
-        client = EmailClient(endpoint, DefaultAzureCredential())
+        client = EmailClient(endpoint, get_azure_credential())
         message = {
             "senderAddress": sender_address,
             "recipients": {

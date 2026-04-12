@@ -30,6 +30,15 @@ coverage.xml
 # Virtual environments
 venv/
 .env
+.venv/
+__pycache__/
+
+# Large demo/indexing datasets are not required for container startup
+data/ai-search-index/
+data/pred_maint/
+data/ag-demo-retail/
+data/ag-demo-safety/
+data/ag-demo-fsi-upsell/
 
 
 # Editor directories and files

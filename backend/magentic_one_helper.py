@@ -17,8 +17,9 @@ from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from autogen_core import AgentId, AgentProxy, DefaultTopicId
 from autogen_core import SingleThreadedAgentRuntime
 from autogen_core import CancellationToken
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.identity import get_bearer_token_provider
 import tempfile
+from auth import get_azure_credential
 
 from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
 from dotenv import load_dotenv
@@ -28,7 +29,7 @@ from magentic_one_custom_agent import MagenticOneCustomAgent
 from magentic_one_custom_rag_agent import MagenticOneRAGAgent
 from magentic_one_custom_mcp_agent import MagenticOneCustomMCPAgent
 
-azure_credential = DefaultAzureCredential()
+azure_credential = get_azure_credential()
 token_provider = get_bearer_token_provider(
     azure_credential, "https://cognitiveservices.azure.com/.default"
 )

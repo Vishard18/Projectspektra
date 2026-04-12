@@ -2,7 +2,7 @@
 from fastapi import FastAPI, Depends, UploadFile, HTTPException, Query, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2AuthorizationCodeBearer
-from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.identity import get_bearer_token_provider
 from azure.storage.blob import BlobServiceClient
 # from sqlalchemy.orm import Session
 import schemas, crud
@@ -18,6 +18,8 @@ from autogen_agentchat.base import TaskResult
 from magentic_one_helper import generate_session_name
 import aisearch
 import logging
+from applicationinsights import TelemetryClient
+from auth import get_azure_credential
 
 from datetime import datetime 
 from schemas import AutoGenMessage
@@ -28,6 +30,33 @@ print("Starting the server...")
 #print(f'AZURE_OPENAI_ENDPOINT:{os.getenv("AZURE_OPENAI_ENDPOINT")}')
 #print(f'COSMOS_DB_URI:{os.getenv("COSMOS_DB_URI")}')
 #print(f'AZURE_SEARCH_SERVICE_ENDPOINT:{os.getenv("AZURE_SEARCH_SERVICE_ENDPOINT")}')
+
+_telemetry_configured = False
+_telemetry_client = None
+
+
+def _extract_instrumentation_key(connection_string: str | None) -> str | None:
+    if not connection_string:
+        return None
+    for part in connection_string.split(";"):
+        if part.startswith("InstrumentationKey="):
+            return part.split("=", 1)[1].strip()
+    return None
+
+
+def configure_application_insights() -> None:
+    global _telemetry_configured, _telemetry_client
+    if _telemetry_configured:
+        return
+
+    connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+    instrumentation_key = _extract_instrumentation_key(connection_string)
+    if not instrumentation_key:
+        return
+
+    _telemetry_client = TelemetryClient(instrumentation_key)
+    _telemetry_client.context.application.ver = "dream-team-backend"
+    _telemetry_configured = True
 
 session_data = {}
 MAGENTIC_ONE_DEFAULT_AGENTS = [
@@ -69,11 +98,16 @@ MAGENTIC_ONE_DEFAULT_AGENTS = [
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup code: initialize database and configure logging
-    # app.state.db = None
-    app.state.db = CosmosDB()
+    app.state.db = None
+    configure_application_insights()
     logging.basicConfig(level=logging.WARNING,
                         format='%(levelname)s: %(asctime)s - %(message)s')
-    print("Database initialized.")
+    try:
+        app.state.db = CosmosDB()
+        print("Database initialized.")
+    except Exception as exc:
+        logging.getLogger("startup").exception("Database initialization failed: %s", exc)
+        print(f"Database initialization failed: {exc}")
     yield
     # Shutdown code (optional)
     # Cleanup database connection
@@ -89,6 +123,33 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def application_insights_middleware(request, call_next):
+    start_time = time.perf_counter()
+    response = None
+    try:
+        response = await call_next(request)
+        return response
+    except Exception:
+        if _telemetry_client:
+            _telemetry_client.track_exception()
+            _telemetry_client.flush()
+        raise
+    finally:
+        if _telemetry_client:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            status_code = response.status_code if response is not None else 500
+            url = str(request.url)
+            _telemetry_client.track_request(
+                name=f"{request.method} {request.url.path}",
+                url=url,
+                success=200 <= status_code < 400,
+                duration=duration_ms,
+                response_code=str(status_code),
+            )
+            _telemetry_client.flush()
 
 
 # Azure AD Authentication (Mocked for example)
@@ -111,7 +172,7 @@ from openai import AsyncAzureOpenAI
 
 # Azure OpenAI Client
 async def get_openai_client():
-    azure_credential = DefaultAzureCredential()
+    azure_credential = get_azure_credential()
     token_provider = get_bearer_token_provider(
         azure_credential, "https://cognitiveservices.azure.com/.default"
     )
@@ -122,6 +183,26 @@ async def get_openai_client():
         # azure_endpoint="https://aoai-eastus-mma-cdn.openai.azure.com/",
         azure_ad_token_provider=token_provider
     )
+
+
+def build_sse_payload(
+    *,
+    session_id: str,
+    user_id: str,
+    source: str,
+    content: str,
+    stop_reason: str = "",
+) -> str:
+    payload = {
+        "time": get_current_time(),
+        "session_id": session_id,
+        "session_user": user_id,
+        "type": "TextMessage",
+        "source": source,
+        "content": content,
+        "stop_reason": stop_reason,
+    }
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 def write_log(path, log_entry):
@@ -352,6 +433,8 @@ async def chat_endpoint(
 async def chat_stream(
     session_id: str = Query(...),
     user_id: str = Query(...),
+    task: str | None = Query(default=None),
+    agents_json: str | None = Query(default=None),
     # db: Session = Depends(get_db),
     user: dict = Depends(validate_token)
 ):
@@ -367,7 +450,25 @@ async def chat_stream(
 
     # get the conversation from the database using user and session id
     conversation = crud.get_conversation(user_id, session_id)
+    if conversation is None:
+        fallback_agents = MAGENTIC_ONE_DEFAULT_AGENTS
+        if agents_json:
+            try:
+                fallback_agents = json.loads(agents_json)
+            except json.JSONDecodeError:
+                logger.warning("Invalid agents_json for session_id=%s", session_id)
+
+        conversation = {
+            "messages": [{"content": task or "", "role": "user"}],
+            "run_mode_locally": False,
+            "agents": fallback_agents,
+        }
     logger.info(f"Conversation retrieved: {conversation}")
+    if not conversation.get("messages"):
+        return Response(
+            content="Unable to start the stream because no task was found for this session.",
+            status_code=400,
+        )
     # get first message from the conversation
     first_message = conversation["messages"][0]
     # get the task from the first message as content
@@ -386,13 +487,44 @@ async def chat_stream(
 
     stream, cancellation_token = magentic_one.main(task = task)
     logger.info(f"Stream and cancellation token created for task: {task}")
+    session_data[session_id] = {
+        "cancellation_token": cancellation_token,
+        "started_at": get_current_time(),
+        "user_id": user_id,
+    }
 
 
     async def event_generator(stream, conversation):
-
-        async for log_entry in stream:
-            json_response = await display_log_message(log_entry=log_entry, logs_dir=logs_dir, session_id=magentic_one.session_id, conversation=conversation, user_id=user_id)    
-            yield f"data: {json.dumps(json_response.to_json())}\n\n"
+        yield build_sse_payload(
+            session_id=magentic_one.session_id,
+            user_id=user_id,
+            source="MagenticOneOrchestrator",
+            content="Session started. Initializing agents and preparing the first response.",
+        )
+        try:
+            async for log_entry in stream:
+                json_response = await display_log_message(log_entry=log_entry, logs_dir=logs_dir, session_id=magentic_one.session_id, conversation=conversation, user_id=user_id)
+                yield f"data: {json.dumps(json_response.to_json())}\n\n"
+        except asyncio.CancelledError:
+            yield build_sse_payload(
+                session_id=magentic_one.session_id,
+                user_id=user_id,
+                source="MagenticOneOrchestrator",
+                content="Session stopped by the user.",
+                stop_reason="cancelled",
+            )
+            raise
+        except Exception as e:
+            logger.exception("Streaming failed for session_id=%s", session_id)
+            yield build_sse_payload(
+                session_id=magentic_one.session_id,
+                user_id=user_id,
+                source="MagenticOneOrchestrator",
+                content=f"Something went wrong while streaming the response: {str(e)}",
+                stop_reason="error",
+            )
+        finally:
+            session_data.pop(session_id, None)
 
 
     return StreamingResponse(event_generator(stream, conversation), media_type="text/event-stream")

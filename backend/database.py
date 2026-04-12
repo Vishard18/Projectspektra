@@ -1,7 +1,7 @@
 import os
 from azure.cosmos import CosmosClient, PartitionKey
-from azure.identity import DefaultAzureCredential
 from typing import Optional, List, Dict
+from auth import get_azure_credential
 
 from autogen_agentchat.base import TaskResult
 from autogen_agentchat.messages import MultiModalMessage, TextMessage, ToolCallExecutionEvent, ToolCallRequestEvent, SelectSpeakerEvent, ToolCallSummaryMessage
@@ -19,7 +19,7 @@ class CosmosDB:
         # Get Cosmos DB account details
         COSMOS_DB_URI = os.getenv("COSMOS_DB_URI", "https://YOURDB.documents.azure.com:443/")
         COSMOS_DB_DATABASE = os.getenv("COSMOS_DB_DATABASE", "ag_demo")
-        credential = DefaultAzureCredential()
+        credential = get_azure_credential()
         self.client = CosmosClient(COSMOS_DB_URI, credential=credential)
         self.database = self.client.create_database_if_not_exists(id=COSMOS_DB_DATABASE)
         self.containers = {}

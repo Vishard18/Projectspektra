@@ -3,10 +3,13 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "environmentName": {
-      "value": "dreamteam-lab"
+      "value": "dreamteam-lab-v1"
     },
     "location": {
-      "value": "eastus"
+      "value": "centralus"
+    },
+    "deploySessionPool": {
+      "value": true
     }
   }
 }

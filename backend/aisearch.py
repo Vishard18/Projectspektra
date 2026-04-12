@@ -5,7 +5,7 @@ import subprocess
 import time
 
 from azure.core.exceptions import ResourceExistsError
-from azure.identity import AzureDeveloperCliCredential, DefaultAzureCredential, ManagedIdentityCredential
+from azure.identity import AzureDeveloperCliCredential, ManagedIdentityCredential
 from azure.search.documents.indexes import SearchIndexClient, SearchIndexerClient
 from azure.search.documents.indexes.models import (
     AzureOpenAIEmbeddingSkill,
@@ -44,6 +44,7 @@ from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 from typing import List
 from fastapi import UploadFile
+from auth import get_azure_credential
 # from rich.logging import RichHandler
 
 EMBEDDINGS_DIMENSIONS = 3072
@@ -276,7 +277,7 @@ def process_upload_and_index(index_name: str, upload_files: List[UploadFile]):
     AZURE_STORAGE_ENDPOINT =  os.getenv("AZURE_STORAGE_ACCOUNT_ENDPOINT")
     AZURE_STORAGE_CONNECTION_STRING =  f"ResourceId={os.getenv('AZURE_STORAGE_ACCOUNT_ID')}"
 
-    azure_credential = DefaultAzureCredential()
+    azure_credential = get_azure_credential()
     azure_storage_container = index_name
 
     blob_client = BlobServiceClient(
@@ -331,7 +332,7 @@ if __name__ == "__main__":
 
 
     # AVAILABLE
-    azure_credential = DefaultAzureCredential()
+    azure_credential = get_azure_credential()
     # azure_credential = ManagedIdentityCredential()
     
     # azure_credential = ManagedIdentityCredential(identity_config={"resource_id": UAMI_RESOURCE_ID})

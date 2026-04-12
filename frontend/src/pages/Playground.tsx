@@ -101,6 +101,7 @@ export default function App() {
   const [sessionID, setSessionID] = useState('')
   const [userMessage, setUserMessage] = useState('')
   const [sessionTime, setSessionTime] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
   // const [files, setFiles] = useState<{ name: string, size: number, date: string }[]>([])
   const [isAuthenticated, setIsAuthenticated] = useState(ALLWAYS_LOGGED_IN)
   // const [fileUpload, setFileUpload] = useState<File | null>(null)
@@ -158,9 +159,11 @@ export default function App() {
 
   const handleSendStreamingMessage = async () => {
     if (!userMessage.trim()) return;
+    const trimmedMessage = userMessage.trim();
     setIsTyping(true);
-    const newMessage = { user: 'User', message: userMessage };
-    setChatHistory([...chatHistory, newMessage]);
+    setStatusMessage('Starting your run and connecting to the backend...');
+    const newMessage = { user: 'User', message: trimmedMessage };
+    setChatHistory((prev) => [...prev, newMessage]);
     // Start timer
     const startTime = Date.now();
 
@@ -170,16 +173,20 @@ export default function App() {
 
     try {
       const response = await axios.post(`${BASE_URL}/start`, { 
-        content: userMessage, 
+        content: trimmedMessage, 
         user_id: userInfo.email, // Use directly from context
         agents: JSON.stringify(selectedAgents)
       });
       const sessionId = response.data.response;  // Get the session ID from the response
       setSessionID(sessionId);
-      const eventSource = new EventSource(`${BASE_URL}/chat-stream?session_id=${encodeURIComponent(sessionId)}&user_id=${encodeURIComponent(userInfo.email)}`);
+      setStatusMessage(`Session ${sessionId} is running. Waiting for the first agent update...`);
+      const eventSource = new EventSource(
+        `${BASE_URL}/chat-stream?session_id=${encodeURIComponent(sessionId)}&user_id=${encodeURIComponent(userInfo.email)}&task=${encodeURIComponent(trimmedMessage)}&agents_json=${encodeURIComponent(JSON.stringify(selectedAgents))}`
+      );
       eventSource.onmessage = (event) => {
         // console.log('EventSource message:', event.data);
         const data = JSON.parse(event.data);
+        setStatusMessage('');
         if (data.stop_reason) {
           setIsTyping(false);
           // Measure elapsed time and set sessionTime (assumes sessionTime state exists)
@@ -187,7 +194,7 @@ export default function App() {
           const minutes = Math.floor(elapsedTime / 60000);
           const seconds = Math.floor((elapsedTime % 60000) / 1000);
           setSessionTime(`${minutes}:${seconds < 10 ? '0' : ''}${seconds}`);
-          // eventSource.close();
+          eventSource.close();
         }
 
 
@@ -209,10 +216,13 @@ export default function App() {
   
       eventSource.onerror = (error) => {
         setIsTyping(false);
+        setStatusMessage('The live response stream was interrupted. Please try again or start a new run.');
         console.error('EventSource error:', error);
         eventSource.close();
       };
     } catch (error) {
+      setStatusMessage('Unable to start the session. Please verify the backend URL and try again.');
+      setIsTyping(false);
       console.error('Chat error:', error);
     }
     setUserMessage('');
@@ -404,6 +414,7 @@ export default function App() {
                 {isTyping ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <p className='text-sm text-muted-foreground'>Running {sessionID} session...</p>
+                    {statusMessage ? <p className='text-sm text-muted-foreground'>{statusMessage}</p> : null}
                     <Loader2 className="lucide lucide-loader2 mr-2 h-4 animate-spin loader-green" />
                     {/* button to stop the session */}
                     <Button variant="destructive" onClick={() => stopSession()}>Stop</Button>
